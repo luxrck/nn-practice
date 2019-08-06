@@ -1,0 +1,7 @@
+__pycache__
+data
+paper
+notes
+checkpoint
+*.tar.*
+*.txt
