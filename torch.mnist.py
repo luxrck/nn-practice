@@ -12,6 +12,7 @@ from torchvision import datasets, transforms
 import numpy as np
 
 from sparkle.utils import train, test
+from sparkle.utils.metrics import accuracy
 from sparkle.train import App, Trainer, Checkpoint
 
 
@@ -28,7 +29,7 @@ class MNet(nn.Module):
         x = self.layer1(x)
         x = F.relu(x)
         x = self.layer2(x)
-        x = F.softmax(x)
+        # x = F.softmax(x)
         return x
 
 
@@ -46,7 +47,7 @@ class LeNet5(nn.Module):
             nn.MaxPool2d(2)         # 32, 4, 4
         )
         self.out = nn.Sequential(
-            nn.Linear(32 * 4 * 4, 10)
+            nn.Linear(32 * 4 * 4, 10),
             # nn.Softmax()
         )
     def forward(self, x):
@@ -62,7 +63,7 @@ class LeNet5(nn.Module):
 
 
 if __name__ == "__main__":
-    batch_size = 64
+    batch_size = 128
 
     train_set = datasets.MNIST("data", train=True, download=True, transform=transforms.ToTensor())
     test_set = datasets.MNIST("data", train=False, download=True, transform=transforms.ToTensor())
@@ -77,21 +78,22 @@ if __name__ == "__main__":
     @app.on("iter_started")
     def mnist_train(e):
         # import pdb; pdb.set_trace()
-        model = e.model
-        criterion = e.criterion
-        optimizer = e.optimizer
-        batch = e.batch
-        inputs, labels = batch
-
-        model.zero_grad()
-        y_predict = model(inputs)
-        loss = criterion(y_predict, labels)
-        optimizer.step()
+        inputs, labels = e.batch
+        e.model.zero_grad()
+        y_predict = e.model(inputs)
+        loss = e.criterion(y_predict, labels)
         loss.backward()
+        e.optimizer.step()
+        print(loss)
 
     app.fastforward()   \
        .save_every(iters=500)   \
        .set_optimizer(optim.Adam, lr=0.0015, eps=1e-4)  \
        .to("cpu")  \
        .half()  \
-       .run(train_loader, max_iters=1500)
+       .run(train_loader, max_iters=4000)
+
+    yp, y = app.eval(test_loader)
+    yp = [torch.argmax(p, dim=-1) for p in yp]
+    acc = accuracy(yp, y)
+    print(acc)

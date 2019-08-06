@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import functools
+import inspect
 from collections import defaultdict, deque
 
 import torch
@@ -13,20 +14,26 @@ from tqdm import tqdm
 
 
 class Checkpoint(object):
+    def __new__(cls, app):
+        self = super().__new__(cls)
+        self.__init__(app)
+        app.register("checkpoint", self)
+        return app
+
     def __init__(self, app):
         self.app = app
         self.fastforwarded = False
-        self.checkpoint_root = os.path.join(self.app_root, "checkpoint")
+        self.checkpoint_root = os.path.join(app.app_root, "checkpoint")
 
     def fastforward(self, index=-1):
         @self.app.on("train_started")
         def forward(e):
             self._fastforward(index=index)
-            e.trainer.current_iter = self.current_iter
         return self
     def _fastforward(self, index=-1):
-        model_name = self.model.__class__.__name__
+        app = self.app
         checkpoint = self.checkpoint_root
+        model_name = app.model.__class__.__name__
         if not os.path.exists(checkpoint):
             os.mkdir(checkpoint)
         state = None
@@ -35,40 +42,36 @@ class Checkpoint(object):
         if fastforward:
             fastforward = sorted(fastforward, key=lambda x: int(key(x).group(0)))
             model_location = os.path.join(checkpoint, fastforward[index])
-            state = torch.load(model_location, map_location=self.device)
+            state = torch.load(model_location, map_location=app.device)
         if state:
-            self.current_iter = state["start"]
-            self.model.load_state_dict(state["model"])
+            app.current_iter = state["start"]
+            app.model.load_state_dict(state["model"])
             # By default all the modules are initialized to train mode (self.training = True).
             # Also be aware that some layers have different behavior during train/and evaluation
             # (like BatchNorm, Dropout) so setting it matters.
-            self.model.train()
-            self.optimizer.load_state_dict(state["optim"])
+            app.model.train()
+            app.optimizer.load_state_dict(state["optim"])
         return self
 
     def save_every(self, iters=1000):
-        @self.on("iter_completed")
+        @self.app.on("iter_completed")
         def save(e):
+            trainer = e.trainer
             current_iter = e.current_iter
             if current_iter % iters == 0:
-                torch.save({"start": current_iter + 1, "model": self.model.state_dict(), "optim": self.optimizer.state_dict()},
-                           os.path.join(self.checkpoint_root, f"{self.model.__class__.__name__}.{current_iter}.pt"))
+                torch.save({"start": current_iter + 1, "model": trainer.model.state_dict(), "optim": trainer.optimizer.state_dict()},
+                           os.path.join(self.checkpoint_root, f"{trainer.model.__class__.__name__}.{current_iter}.pt"))
         return self
 
-    # Called when the default attribute access fails with an AttributeError (either __getattribute__() raises an
-    # AttributeError because name is not an instance attribute or an attribute in the class tree for self; or __get__()
-    # of a name property raises AttributeError). This method should either return the (computed) attribute value or raise
-    # an AttributeError exception.
-    # https://docs.python.org/3/reference/datamodel.html#object.__getattr__
-    def __getattr__(self, k):
-        if self.fastforwarded:
-            raise AttributeError("Can not call `self.to` or `self.half` after `Checkpoint::fastforwarded`.")
-        try:
-            return self.app.__getattribute__(k)
-        except AttributeError:
-            return self.app.__getattr__(k)
 
 
+class Self(object):
+    def __init__(self, prev_self, chained):
+        self._self = prev_self
+        self.chained = chained
+    def __call__(self, *args, **kwargs):
+        self.chained(*args, **kwargs)
+        return self._self
 
 class Trainer(object):
     r'''
@@ -88,7 +91,12 @@ class Trainer(object):
     def __init__(self, app):
         self.app = app
         self.event_map = defaultdict(set)
+        self.extension_map = {}
         self.current_iter = 1
+
+    def register(self, name, ext):
+        self.extension_map[name] = ext
+        return self
 
     def exec_handles(self, on_event, e):
         deque(map(lambda h: h(e), self.event_map[on_event]))
@@ -105,7 +113,22 @@ class Trainer(object):
         self.optimizer_builder = functools.partial(op, self.model.parameters(), *args, **kwargs)
         return self
 
+    def eval(self, data_iter, prepare_batch=None):
+        self.model.eval()
+        oy_p, oy = [], []
+        with torch.no_grad():
+            for _,batch in tqdm(enumerate(data_iter)):
+                if prepare_batch:
+                    x, y = prepare_batch(batch, device=self.device)
+                else:
+                    x, y = batch
+                y_predicted = self.model(x)
+                oy_p.append(y_predicted)
+                oy.append(y)
+        return oy_p, oy
+
     def run(self, data_iter, max_iters=1000, train=True):
+        self.model.train()
         self.optimizer = self.optimizer_builder()
 
         self.exec_handles("train_started",
@@ -121,26 +144,45 @@ class Trainer(object):
             iterator = tqdm(enumerate(data_iter))
             for i,batch in iterator:
                 self.exec_handles("iter_started",
-                                   Trainer.Event(name="iter_started", batch=batch, model=self.model, criterion=self.criterion, optimizer=self.optimizer))
+                                   Trainer.Event(name="iter_started", trainer=self, batch=batch, model=self.model, criterion=self.criterion, optimizer=self.optimizer))
                 self.exec_handles("iter_completed",
-                                   Trainer.Event(name="iter_completed", current_iter=current_iter))
+                                   Trainer.Event(name="iter_completed", trainer=self, current_iter=current_iter))
                 current_iter += 1
                 if current_iter >= max_iters + 1:
                     break
 
-        return self.exec_handles("train_completed",
-                                  Trainer.Event(name="train_completed", trainer=self))
+        self.exec_handles("train_completed",
+                           Trainer.Event(name="train_completed", trainer=self))
+        return self
 
+    # Called when the default attribute access fails with an AttributeError (either __getattribute__() raises an
+    # AttributeError because name is not an instance attribute or an attribute in the class tree for self; or __get__()
+    # of a name property raises AttributeError). This method should either return the (computed) attribute value or raise
+    # an AttributeError exception.
+    # https://docs.python.org/3/reference/datamodel.html#object.__getattr__
+    # Trainer包装App, 当Train没有属性k时, 可以从App中查找, 但最后要返回Trainer的Instance.
     def __getattr__(self, k):
-        return self.app.__getattribute__(k)
+        v = None
+        for _,ext in self.extension_map.items():
+            try:
+                v = ext.__getattribute__(k)
+                break
+            except AttributeError:
+                pass
+        if not v:
+            v = self.app.__getattribute__(k)
+        # import pdb; pdb.set_trace()
+        if inspect.ismethod(v):
+            return Self(self, v)
+        return v
 
 
 
 class App(object):
     def __init__(self, name="", root=".", **kwargs):
-        self.name = name or os.path.basename(sys.modules[__name__].__file__)
-        self.config(**kwargs)
+        self.app_name = name or os.path.basename(sys.modules[__name__].__file__)
         self.app_root = root
+        self.config(**kwargs)
 
     def config(self, **kwargs):
         default = {
@@ -165,8 +207,4 @@ class App(object):
     def half(self):
         if torch.cuda.is_available():
             self.model, self.criterion = self.model.half(), self.criterion.half()
-        return self
-
-    def build_optimizer(self, op, *args, **kwargs):
-        self.optimizer = op(self.model.parameters(), *args, **kwargs)
         return self

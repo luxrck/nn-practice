@@ -164,6 +164,7 @@ if __name__ == "__main__":
     TRG.build_vocab(_train, min_freq=2)
 
     batch_size = 64
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_iter = BucketIterator(_train, batch_size=batch_size, train=True,
                                  sort_within_batch=True,
@@ -171,14 +172,13 @@ if __name__ == "__main__":
                                  device=device)
     test_iter = BucketIterator(_test, batch_size=1, train=False, repeat=False, device=device)
 
-    model = Seq2Seq(SRC, TRG, src_vocab_size=len(SRC.vocab), trg_vocab_size=len(TRG.vocab), embedding_dim=embedding_dim, hidden_size=hidden_size, dropout_p=dropout_p, attention=False)
+    model = Seq2Seq(SRC, TRG, src_vocab_size=len(SRC.vocab), trg_vocab_size=len(TRG.vocab), embedding_dim=256, hidden_size=512, dropout_p=0.5, attention=False)
     def init_weights(m):
         for name, param in m.named_parameters():
             nn.init.uniform_(param.data, -0.08, 0.08)
     model.apply(init_weights)
 
-    app = Checkpoint(Trainer(App(model=Seq2Seq(SRC, TRG, src_vocab_size=len(SRC.vocab), trg_vocab_size=len(TRG.vocab),
-                                               embedding_dim=256, hidden_size=512, dropout_p=0.5, attention=False),
+    app = Checkpoint(Trainer(App(model=model,
                                  criterion=nn.NLLLoss(ignore_index=TRG.vocab.stoi['<pad>']))))
     @app.on("iter_started")
     def nmt_train(e):
@@ -192,11 +192,11 @@ if __name__ == "__main__":
         model.zero_grad()
         y_predict = model(src, targets, lengths_src, lengths_trg, teacher_forcing_p=0.9)
         targets = targets.transpose(0, 1)
-        loss = torch.tensor([0.0]).type(y_predict.dtype)
+        loss = 0.0 #torch.tensor([0.0]).type(y_predict.dtype)
         for i in range(target.size(0)):
            loss += criterion(y_predict[i], targets[i])
-        optimizer.step()
         loss.backward()
+        optimizer.step()
 
     app.fastforward()   \
        .save_every(iters=1000)  \
@@ -205,12 +205,12 @@ if __name__ == "__main__":
        .half()  \
        .run(train_iter, max_iters=20000)
 
-    @app.on("train_completed")
-    def nmt_eval(e):
-        trainer, data = e.trainer, e.data
-        trainer.eval(data, metric=bleu)
+    # @app.on("train_completed")
+    # def nmt_eval(e):
+    #     trainer, data = e.trainer, e.data
+    #     trainer.eval(data, metric=bleu)
 
-    app.run(test_iter, train=False)
+    # app.run(test_iter, train=False)
 
 
     # @train(model, criterion, optimizer, train_iter, epochs, device=device, immediate=False, checkpoint=True, verbose=False)
@@ -264,5 +264,5 @@ if __name__ == "__main__":
                 score += sc
                 #import pdb; pdb.set_trace()
         print("BLEU: ", score / 1000)
-    nmt_train()
-    nmt_eval(model, criterion)
+    # nmt_train()
+    # nmt_eval(model, criterion)
