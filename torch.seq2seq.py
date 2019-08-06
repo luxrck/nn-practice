@@ -51,7 +51,13 @@ class Seq2Seq(nn.Module):
                         nn.LogSoftmax(dim=1))
 
     # (seq_len, batch, embedding_dim)
-    def forward(self, src, trg, lengths_src, lengths_trg, teacher_forcing_p=0.8):
+    def forward(self, batch, max_len=128, teacher_forcing_p=0.8):
+        is_training = teacher_forcing_p > 0
+
+        src, trg = batch
+        src, lengths_src = src
+        trg, lengths_trg = trg
+
         src = self.src_emb(src)
         trg = self.trg_emb(trg)
 
@@ -65,8 +71,13 @@ class Seq2Seq(nn.Module):
         output = []
 
         lengths_trg = lengths_trg.view(-1)
-        di = trg[0].view(1, *trg[0].size())
-        for i in range(trg.size(0)):
+
+        di = torch.tensor([self.src.vocab.stoi["<sos>"]]).type(src.dtype)
+        if is_training:
+            di = trg[0].view(1, *trg[0].size())
+            max_len = trg.size(0)
+
+        for i in range(max_len):
             od, (h, c) = self.decoder(di, (h, c))
 
             x = h.permute(1,0,2).contiguous()
@@ -90,6 +101,11 @@ class Seq2Seq(nn.Module):
             else:
                 _, topi = y.topk(1)
                 di = self.trg_emb(topi).permute(1,0,2)
+
+                if is_training == False:
+                    if topi.item() == 3:    # <eos>
+                        output.append(y.unsqueeze(1))
+                        break
 
             output.append(y.unsqueeze(1))
 
@@ -193,17 +209,28 @@ if __name__ == "__main__":
         y_predict = model(src, targets, lengths_src, lengths_trg, teacher_forcing_p=0.9)
         targets = targets.transpose(0, 1)
         loss = 0.0 #torch.tensor([0.0]).type(y_predict.dtype)
-        for i in range(target.size(0)):
+        for i in range(targets.size(0)):
            loss += criterion(y_predict[i], targets[i])
         loss.backward()
         optimizer.step()
+
+    @app.on("evaluate")
+    def nmt_eval(e):
+        # set `teacher_forcing_p < 0` to indicate that we are in `evaluate` mode.
+        targets, _ = e.batch.trg
+        decode_output = e.model(e.batch, max_len=128, teacher_forcing_p=-1)
+        targets = list(targets.view(-1))
+        targets = [TRG.vocab.itos[i] for i in targets]
+        print("T:", " ".join(targets))
+        print("D:", " ".join(decode_output))
 
     app.fastforward()   \
        .save_every(iters=1000)  \
        .set_optimizer(optim.Adam, lr=0.0004, eps=1e-4)  \
        .to("auto")  \
        .half()  \
-       .run(train_iter, max_iters=20000)
+       .run(train_iter, max_iters=20000, train=False)   \
+       .eval(test_iter)
 
     # @app.on("train_completed")
     # def nmt_eval(e):

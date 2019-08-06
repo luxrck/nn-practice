@@ -65,14 +65,6 @@ class Checkpoint(object):
 
 
 
-class Self(object):
-    def __init__(self, prev_self, chained):
-        self._self = prev_self
-        self.chained = chained
-    def __call__(self, *args, **kwargs):
-        self.chained(*args, **kwargs)
-        return self._self
-
 class Trainer(object):
     r'''
     Events:
@@ -80,6 +72,8 @@ class Trainer(object):
         iter_started:
         iter_completed:
         train_completed:
+
+        evaluate:
     '''
 
     class Event(object):
@@ -99,7 +93,7 @@ class Trainer(object):
         return self
 
     def exec_handles(self, on_event, e):
-        deque(map(lambda h: h(e), self.event_map[on_event]))
+        return list(map(lambda h: h(e), self.event_map[on_event]))
 
     def on(self, event):
         def event_wrapper(event_handler):
@@ -113,18 +107,19 @@ class Trainer(object):
         self.optimizer_builder = functools.partial(op, self.model.parameters(), *args, **kwargs)
         return self
 
-    def eval(self, data_iter, prepare_batch=None):
+    def eval(self, data_iter):
         self.model.eval()
+        self.optimizer = self.optimizer_builder()
+
         oy_p, oy = [], []
+
         with torch.no_grad():
             for _,batch in tqdm(enumerate(data_iter)):
-                if prepare_batch:
-                    x, y = prepare_batch(batch, device=self.device)
-                else:
-                    x, y = batch
-                y_predicted = self.model(x)
+                # TODO: Not a good implementation...
+                y_predicted, targets = self.exec_handles("evaluate",
+                                                 Trainer.Event(name="evaluate", trainer=self, batch=batch, model=self.model, criterion=self.criterion, optimizer=self.optimizer))[0]
                 oy_p.append(y_predicted)
-                oy.append(y)
+                oy.append(targets)
         return oy_p, oy
 
     def run(self, data_iter, max_iters=1000, train=True):
@@ -162,6 +157,13 @@ class Trainer(object):
     # https://docs.python.org/3/reference/datamodel.html#object.__getattr__
     # Trainer包装App, 当Train没有属性k时, 可以从App中查找, 但最后要返回Trainer的Instance.
     def __getattr__(self, k):
+        class Self(object):
+            def __init__(self, prev_self, chained):
+                self._self = prev_self
+                self.chained = chained
+            def __call__(self, *args, **kwargs):
+                self.chained(*args, **kwargs)
+                return self._self
         v = None
         for _,ext in self.extension_map.items():
             try:
