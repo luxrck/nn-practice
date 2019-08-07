@@ -19,7 +19,7 @@ class LeNet5(nn.Module):
         )
         self.out = nn.Sequential(
             nn.Linear(32 * 4 * 4, 10),
-            nn.Softmax()
+            #nn.Softmax()
         )
     def forward(self, x):
         # import pdb; pdb.set_trace()
@@ -27,7 +27,7 @@ class LeNet5(nn.Module):
         x = self.conv1(x)
         x = self.conv2(x)
         # import pdb; pdb.set_trace()
-        x_dim = reduce(lambda a,b: a*b, x.shape[1:], 1)
-        x = x.view(batch_size, x_dim)
+        #x_dim = reduce(lambda a,b: a*b, x.shape[1:], 1)
+        x = x.view(batch_size, -1)
         x = self.out(x)
         return x

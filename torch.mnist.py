@@ -1,5 +1,5 @@
 # !/usr/bin/python
-
+import pdb
 from functools import reduce
 
 import torch
@@ -11,9 +11,10 @@ from torchvision import datasets, transforms
 
 import numpy as np
 
-from sparkle.utils import train, test
 from sparkle.utils.metrics import accuracy
 from sparkle.train import App, Trainer, Checkpoint
+
+from sparkle.models import LeNet5
 
 
 class MNet(nn.Module):
@@ -33,34 +34,6 @@ class MNet(nn.Module):
         return x
 
 
-class LeNet5(nn.Module):
-    def __init__(self):
-        super(LeNet5, self).__init__()
-        self.conv1 = nn.Sequential( # 1, 28, 28
-            nn.Conv2d(1, 16, 5),    # 16, 24, 24
-            nn.ReLU(),
-            nn.MaxPool2d(2),        # 16, 12, 12
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(16, 32, 5),   # 32, 8, 8
-            nn.ReLU(),
-            nn.MaxPool2d(2)         # 32, 4, 4
-        )
-        self.out = nn.Sequential(
-            nn.Linear(32 * 4 * 4, 10),
-            # nn.Softmax()
-        )
-    def forward(self, x):
-        # import pdb; pdb.set_trace()
-        batch_size = x.size(0)
-        x = self.conv1(x)
-        x = self.conv2(x)
-        # import pdb; pdb.set_trace()
-        x_dim = reduce(lambda a,b: a*b, x.shape[1:], 1)
-        x = x.view(batch_size, x_dim)
-        x = self.out(x)
-        return x
-
 
 if __name__ == "__main__":
     batch_size = 128
@@ -75,25 +48,34 @@ if __name__ == "__main__":
 
     app = Checkpoint(Trainer(App(model=LeNet5(), criterion=nn.CrossEntropyLoss())))
 
-    @app.on("iter_started")
+    @app.on("train")
     def mnist_train(e):
-        # import pdb; pdb.set_trace()
         inputs, labels = e.batch
         e.model.zero_grad()
         y_predict = e.model(inputs)
         loss = e.criterion(y_predict, labels)
         loss.backward()
         e.optimizer.step()
-        print(loss)
+        e.a.loss = loss.item()
+
+    @app.on("iter_completed")
+    def logging(e):
+        if e.current_iter % 200 == 0:
+            print(e.a.loss)
+
+    @app.on("evaluate")
+    def mnist_eval(e):
+        inputs, targets = e.batch
+        y_predict = e.model(inputs)
+        return y_predict, targets
 
     app.fastforward()   \
-       .save_every(iters=500)   \
+       .save_every(iters=2000)   \
        .set_optimizer(optim.Adam, lr=0.0015, eps=1e-4)  \
        .to("cpu")  \
-       .half()  \
-       .run(train_loader, max_iters=4000)
-
+       .run(train_loader, max_iters=20)    \
+    
+    pdb.set_trace()
     yp, y = app.eval(test_loader)
-    yp = [torch.argmax(p, dim=-1) for p in yp]
     acc = accuracy(yp, y)
     print(acc)

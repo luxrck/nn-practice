@@ -69,7 +69,7 @@ class Trainer(object):
     r'''
     Events:
         train_started:
-        iter_started:
+        iter_started / train:
         iter_completed:
         train_completed:
 
@@ -85,6 +85,8 @@ class Trainer(object):
     def __init__(self, app):
         self.app = app
         self.event_map = defaultdict(set)
+        self.event_map["train"] = self.event_map["iter_started"]
+        
         self.extension_map = {}
         self.current_iter = 1
 
@@ -107,14 +109,13 @@ class Trainer(object):
         self.optimizer_builder = functools.partial(op, self.model.parameters(), *args, **kwargs)
         return self
 
-    def eval(self, data_iter):
+    def eval(self, data):
         self.model.eval()
-        self.optimizer = self.optimizer_builder()
 
         oy_p, oy = [], []
 
         with torch.no_grad():
-            for _,batch in tqdm(enumerate(data_iter)):
+            for _,batch in tqdm(enumerate(data)):
                 # TODO: Not a good implementation...
                 y_predicted, targets = self.exec_handles("evaluate",
                                                  Trainer.Event(name="evaluate", trainer=self, batch=batch, model=self.model, criterion=self.criterion, optimizer=self.optimizer))[0]
@@ -122,32 +123,35 @@ class Trainer(object):
                 oy.append(targets)
         return oy_p, oy
 
-    def run(self, data_iter, max_iters=1000, train=True):
+    def run(self, data, max_iters=1000, train=True):
         self.model.train()
         self.optimizer = self.optimizer_builder()
+        
+        meta = Trainer.Event(name="meta")
 
         self.exec_handles("train_started",
-                           Trainer.Event(name="train_started", trainer=self))
+                           Trainer.Event(name="train_started", a=meta, trainer=self))
 
         current_iter = self.current_iter
 
         if train == False:
-            return self.exec_handles("train_completed",
-                                      Trainer.Event(name="train_completed", trainer=self))
+            self.exec_handles("train_completed",
+                               Trainer.Event(name="train_completed", a=meta, trainer=self))
+            return self
 
         while current_iter < max_iters + 1:
-            iterator = tqdm(enumerate(data_iter))
+            iterator = tqdm(enumerate(data))
             for i,batch in iterator:
                 self.exec_handles("iter_started",
-                                   Trainer.Event(name="iter_started", trainer=self, batch=batch, model=self.model, criterion=self.criterion, optimizer=self.optimizer))
+                                   Trainer.Event(name="iter_started", a=meta, trainer=self, batch=batch, model=self.model, criterion=self.criterion, optimizer=self.optimizer))
                 self.exec_handles("iter_completed",
-                                   Trainer.Event(name="iter_completed", trainer=self, current_iter=current_iter))
+                                   Trainer.Event(name="iter_completed", a=meta, trainer=self, current_iter=current_iter))
                 current_iter += 1
                 if current_iter >= max_iters + 1:
                     break
 
         self.exec_handles("train_completed",
-                           Trainer.Event(name="train_completed", trainer=self))
+                           Trainer.Event(name="train_completed", a=meta, trainer=self))
         return self
 
     # Called when the default attribute access fails with an AttributeError (either __getattribute__() raises an

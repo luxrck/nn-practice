@@ -25,7 +25,7 @@ import spacy
 from gensim import corpora
 
 from sparkle.utils import train, test
-from sparkle.app import App
+from sparkle.train import App, Trainer, Checkpoint
 
 
 
@@ -74,15 +74,10 @@ def preprocess(**kwargs):
 
 
 
-def lm_eval(SRC, model, criterion, device, checkpoint, max_len=128):
+def lm_eval(SRC, app, max_len=128):
     def pick(y, topk=5):
         _, topi = y.squeeze().topk(topk)
         return topi[torch.randint(high=topi.size(0), size=(1,)).squeeze().item()]
-    state = torch.load(f"checkpoint/CharRNN.{checkpoint}.torch")
-    model.load_state_dict(state["model"])
-    model = model.to(device)
-    criterion = criterion.to(device)
-    optimizer.load_state_dict(state["optim"])
 
     with torch.no_grad():
         while True:
@@ -94,10 +89,10 @@ def lm_eval(SRC, model, criterion, device, checkpoint, max_len=128):
             inputs = [SRC.vocab.stoi[s] for s in sent]
             inputs = torch.tensor(inputs).to(device)
             inputs = inputs.view(inputs.size(0), 1)
-            pdb.set_trace()
+            #pdb.set_trace()
             y, hc = model(inputs)
             _, y = y[-1].topk(1)
-            y = torch.tensor([[y]]).to(device)
+            y = torch.tensor([[y]]).to(app.device)
 
             while True:
                 y_predict, hc = model(y, hc)
@@ -113,54 +108,54 @@ def lm_eval(SRC, model, criterion, device, checkpoint, max_len=128):
 
 
 if __name__ == "__main__":
-    lr = 0.0004
-    adam_eps = 1e-4
     batch_size = 128
-    epochs = 100
     num_layers = 2
     embedding_dim = 256
     hidden_size = 512
-    #max_padding_sentence_len = 20
     dropout_p = 0.5
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_iter, dictionary = preprocess(batch_size=batch_size)
     model = CharRNN(len(dictionary.vocab), embedding_dim, hidden_size, num_layers, dropout_p=dropout_p)
-    model = model.to(device)
     def init_weights(m):
         for name, param in m.named_parameters():
             nn.init.uniform_(param.data, -0.08, 0.08)
     model.apply(init_weights)
-    model = model.half()
-    criterion = nn.NLLLoss(ignore_index = dictionary.vocab.stoi['<pad>'])
-    criterion = criterion.to(device)
-    criterion = criterion.half()
-    optimizer = optim.Adam(model.parameters(), lr=lr, eps=adam_eps)
 
-    @train(model, criterion, optimizer, train_iter, epochs, device=device, immediate=False, checkpoint=True, verbose=False)
-    def lm_train(model, criterion, data):
-        # import pdb; pdb.set_trace()
-        src = data.text
+    app = Checkpoint(Trainer(App(model=model,
+                                 criterion=nn.NLLLoss(ignore_index=dictionary.vocab.stoi['<pad>']))))
+
+    @app.on("train")
+    def lm_train(e):
+        e.model.zero_grad()
+        src = e.batch.text
         batch_size = src.size(1)
-        # src, lengths_src = src
-        src = src.to(device)
         target = src[1:,:].contiguous()
         pad = torch.tensor([dictionary.vocab.stoi['<pad>'] for _ in range(batch_size)])
-        pad = pad.view(1, batch_size).to(device)
+        pad = pad.view(1, batch_size).to(target.device)
         target = torch.cat([target, pad])
-        target = target.to(device)
         y_predict, _ = model(src)
-        # target = target.transpose(0, 1)
-        # pdb.set_trace()
-        loss = torch.tensor([0.0]).to(device)
-        loss = loss.half()
+        loss = 0.0
+        #pdb.set_trace()
         for i in range(target.size(0)):
-           loss += criterion(y_predict[i], target[i])
-        #import pdb; pdb.set_trace()
-        return loss
+            loss += e.criterion(y_predict[i], target[i])
+        loss.backward()
+        e.optimizer.step()
+        e.a.loss = loss
+        #print(loss.item())
 
-    from nltk.translate.bleu_score import sentence_bleu
+    import pdb
+    @app.on("iter_completed")
+    def logging(e):
+        if e.current_iter % 200 == 0:
+            #pdb.set_trace()
+            print(e.a.loss)
 
+    app.fastforward()   \
+       .save_every(iters=2000)  \
+       .set_optimizer(optim.Adam, lr=0.0004, eps=1e-4)  \
+       .to("auto")  \
+       .half()  \
+       .run(train_iter, max_iters=20000, train=True)
 
-    lm_train()
-    lm_eval(dictionary, model, criterion, device, 22)
+    lm_eval(dictionary, app)
