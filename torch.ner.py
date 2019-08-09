@@ -23,8 +23,8 @@ import spacy
 
 from gensim import corpora
 
-from sparkle.utils import train, test
-from sparkle.app import App
+from ash.utils import train, test
+from ash.train import App, Trainer, Checkpoint
 
 import pdb
 

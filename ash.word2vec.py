@@ -5,7 +5,7 @@ import itertools
 from collections import OrderedDict, defaultdict
 import numpy as np
 
-from sparkle import softmax
+from ash.utils import softmax
 
 #random.seed(2143)
 #np.random.seed(1234)

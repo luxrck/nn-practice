@@ -21,8 +21,7 @@ from torchnlp.metrics import bleu
 import numpy as np
 import spacy
 
-from sparkle.utils import train, test
-from sparkle.train import App, Trainer, Checkpoint
+from ash.train import App, Trainer, Checkpoint
 
 
 class Seq2Seq(nn.Module):
@@ -153,8 +152,10 @@ if __name__ == "__main__":
             nn.init.uniform_(param.data, -0.08, 0.08)
     model.apply(init_weights)
 
-    app = Checkpoint(Trainer(App(model=model,
-                                 criterion=nn.NLLLoss(ignore_index=TRG.vocab.stoi['<pad>']))))
+    app = Trainer(App(model=model,
+                      criterion=nn.NLLLoss(ignore_index=TRG.vocab.stoi['<pad>'])))
+    app.extend(Checkpoint())
+
     @app.on("train")
     def nmt_train(e):
         e.model.zero_grad()
@@ -167,7 +168,7 @@ if __name__ == "__main__":
         loss.backward()
         e.optimizer.step()
 
-    # evaluate模式下的batch_size=1
+    # test_iter的batch_size=1
     @app.on("evaluate")
     def nmt_eval(e):
         (src, lengths_src), (targets, lengths_trg) = e.batch.src, e.batch.trg

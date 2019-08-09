@@ -14,16 +14,25 @@ from tqdm import tqdm
 
 
 class Checkpoint(object):
-    def __new__(cls, app):
-        self = super().__new__(cls)
-        self.__init__(app)
-        app.register("checkpoint", self)
-        return app
+    #def __new__(cls, app):
+    #    self = super().__new__(cls)
+    #    self.__init__(app)
+    #    app.register("checkpoint", self)
+    #    return app
 
-    def __init__(self, app):
+    __name__ = "checkpoint"
+
+    def __init__(self, root="checkpoint"):
+        self.checkpoint_root = root
+
+    def bind(self, app):
         self.app = app
         self.fastforwarded = False
-        self.checkpoint_root = os.path.join(app.app_root, "checkpoint")
+        self.checkpoint_root = os.path.join(app.app_root, self.checkpoint_root)
+
+    def set_checkpoint_root(self, root):
+        self.checkpoint_root = os.path.join(self.app.app_root, root)
+        return self
 
     def fastforward(self, index=-1):
         @self.app.on("train_started")
@@ -90,8 +99,9 @@ class Trainer(object):
         self.extension_map = {}
         self.current_iter = 1
 
-    def register(self, name, ext):
-        self.extension_map[name] = ext
+    def extend(self, ext):
+        ext.bind(self)
+        self.extension_map[ext.__name__] = ext
         return self
 
     def exec_handles(self, on_event, e):
@@ -106,7 +116,11 @@ class Trainer(object):
         return event_wrapper
 
     def set_optimizer(self, op, *args, **kwargs):
-        self.optimizer_builder = functools.partial(op, self.model.parameters(), *args, **kwargs)
+        if issubclass(op, torch.optim.Optimizer):
+            op = functools.partial(op, self.model.parameters())
+        else:
+            op = functools.partial(op, self)
+        self.optimizer_builder = functools.partial(op, *args, **kwargs)
         return self
 
     def eval(self, data):
@@ -143,7 +157,7 @@ class Trainer(object):
             iterator = tqdm(enumerate(data))
             for i,batch in iterator:
                 self.exec_handles("iter_started",
-                                   Trainer.Event(name="iter_started", a=meta, trainer=self, batch=batch, model=self.model, criterion=self.criterion, optimizer=self.optimizer))
+                                   Trainer.Event(name="iter_started", a=meta, trainer=self, current_iter=current_iter, batch=batch, model=self.model, criterion=self.criterion, optimizer=self.optimizer))
                 self.exec_handles("iter_completed",
                                    Trainer.Event(name="iter_completed", a=meta, trainer=self, current_iter=current_iter))
                 current_iter += 1

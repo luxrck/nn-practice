@@ -11,10 +11,9 @@ from torchvision import datasets, transforms
 
 import numpy as np
 
-from sparkle.utils.metrics import accuracy
-from sparkle.train import App, Trainer, Checkpoint
-
-from sparkle.models import LeNet5
+from ash.utils.metrics import accuracy
+from ash.train import App, Trainer, Checkpoint
+from ash.models import LeNet5
 
 
 class MNet(nn.Module):
@@ -46,16 +45,18 @@ if __name__ == "__main__":
     test_loader = torch.utils.data.DataLoader(test_set)
 
 
-    app = Checkpoint(Trainer(App(model=LeNet5(), criterion=nn.CrossEntropyLoss())))
+    app = Trainer(App(model=LeNet5(), criterion=nn.CrossEntropyLoss()))
+    app.extend(Checkpoint())
 
     @app.on("train")
     def mnist_train(e):
-        inputs, labels = e.batch
         e.model.zero_grad()
+        inputs, labels = e.batch
         y_predict = e.model(inputs)
         loss = e.criterion(y_predict, labels)
         loss.backward()
         e.optimizer.step()
+        
         e.a.loss = loss.item()
 
     @app.on("iter_completed")
@@ -70,12 +71,11 @@ if __name__ == "__main__":
         return y_predict, targets
 
     app.fastforward()   \
-       .save_every(iters=2000)   \
+       .save_every(iters=20)   \
        .set_optimizer(optim.Adam, lr=0.0015, eps=1e-4)  \
        .to("cpu")  \
        .run(train_loader, max_iters=20)    \
     
-    pdb.set_trace()
     yp, y = app.eval(test_loader)
     acc = accuracy(yp, y)
     print(acc)

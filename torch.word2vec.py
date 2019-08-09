@@ -9,8 +9,8 @@ from torchvision import datasets, transforms
 
 import numpy as np
 
-
-from sparkle.utils import train, test
+from ash.utils import train, test
+from ash.train import App, Trainer, Checkpoint
 
 
 class CBOW(nn.Module):
@@ -104,26 +104,32 @@ if __name__ == "__main__":
     batch_size = 1
     epochs = 100
 
-    trainloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    testloader = torch.utils.data.DataLoader(dataset, batch_size=1)
+    train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    test_loader = torch.utils.data.DataLoader(dataset, batch_size=1)
 
     model = CBOW(vocab_size, embedding_dim, context_size)
-    loss_function = nn.NLLLoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.001)
 
-    @train(model, loss_function, optimizer, trainloader, epochs)
-    def cbow_train(model, criterion, inputs, labels):
+    app = Trainer(App(model=model,
+                      criterion=nn.NLLLoss()))
+    app.extend(Checkpoint())
+
+    @app.on("train")
+    def cbow_train(e):
+        e.model.zero_grad()
+        inputs, labels = e.batch
         #import pdb; pdb.set_trace()
         context_ids = [[word_to_ix[w] for w in context] for context in inputs]
         context_ids = torch.tensor(context_ids)
         labels = [word_to_ix[l] for l in labels]
         labels = torch.tensor(labels)
-        y_predicts = model(context_ids)
-        loss = criterion(y_predicts, labels)
-        return loss
+        y_predicts = e.model(context_ids)
+        loss = e.criterion(y_predicts, labels)
+        loss.backward()
+        e.optimizer.step()
 
-    @test(model, loss_function, optimizer, testloader)
-    def cbow_test(model, criterion, inputs, labels):
+    @app.on("evaluate")
+    def cbow_test(e):
+        inputs, labels = e.batch
         context_ids = [[word_to_ix[w] for w in context] for context in inputs]
         context_ids = torch.tensor(context_ids)
         labels = [word_to_ix[l] for l in labels]
@@ -132,7 +138,9 @@ if __name__ == "__main__":
         #import pdb; pdb.set_trace()
         #loss = criterion(y_predicts, labels)
         _, y_predicts = torch.max(y_predicts.data, dim=1)
-        return (y_predicts == labels).sum()
+        return y_predicts, labels
 
-    cbow_train()
-    cbow_test()
+    app.to("cpu")   \
+       .set_optimizer(optim.SGD, lr=0.01)   \
+       .run(train_loader, max_iters=1000, train=True)   \
+       .eval(test_loader)

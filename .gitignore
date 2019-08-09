@@ -3,5 +3,7 @@ data
 paper
 notes
 checkpoint
+
+*.pyc
 *.tar.*
 *.txt

@@ -24,8 +24,7 @@ import spacy
 
 from gensim import corpora
 
-from sparkle.utils import train, test
-from sparkle.train import App, Trainer, Checkpoint
+from ash.train import App, Trainer, Checkpoint
 
 
 
@@ -117,13 +116,13 @@ if __name__ == "__main__":
 
     train_iter, dictionary = preprocess(batch_size=batch_size)
     model = CharRNN(len(dictionary.vocab), embedding_dim, hidden_size, num_layers, dropout_p=dropout_p)
-    def init_weights(m):
-        for name, param in m.named_parameters():
-            nn.init.uniform_(param.data, -0.08, 0.08)
-    model.apply(init_weights)
+    #def init_weights(m):
+    #    for name, param in m.named_parameters():
+    #        nn.init.uniform_(param.data, -0.08, 0.08)
+    #model.apply(init_weights)
 
-    app = Checkpoint(Trainer(App(model=model,
-                                 criterion=nn.NLLLoss(ignore_index=dictionary.vocab.stoi['<pad>']))))
+    app = Trainer(App(model=model,
+                      criterion=nn.NLLLoss(ignore_index=dictionary.vocab.stoi['<pad>'])))
 
     @app.on("train")
     def lm_train(e):
@@ -140,11 +139,12 @@ if __name__ == "__main__":
         for i in range(target.size(0)):
             loss += e.criterion(y_predict[i], target[i])
         loss.backward()
+
+        #torch.nn.utils.clip_grad_norm_(e.model.parameters(), max_norm=2)
         e.optimizer.step()
         e.a.loss = loss
         #print(loss.item())
 
-    import pdb
     @app.on("iter_completed")
     def logging(e):
         if e.current_iter % 200 == 0:
