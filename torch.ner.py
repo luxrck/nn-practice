@@ -29,22 +29,33 @@ from ash.train import App, Trainer, Checkpoint
 import pdb
 
 
-class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, n_head, d_input, d_attn_weight, d_model):
-        super(MultiHeadSelfAttention, self).__init__()
-        self.linear_q = nn.Linear(d_input, n_head * d_attn_weight)
-        self.linear_k = nn.Linear(d_input, n_head * d_attn_weight)
-        self.linear_v = nn.Linear(d_input, n_head * d_attn_weight)
-        self.out = nn.Linear(n_head * d_attn_weight, d_model)
+class GeneralAttention(nn.Module):
+    def __init__(self):
+        super(GeneralAttention, self).__init__()
+    def forward(self, Q, K, V, mask=None):
+        e = Q.matmul(K.transpose(-1, -2))
+        e = e / K.var().sqrt()
+        if mask is not None:
+            e = e.dot(mask)
+        a = F.softmax(e, dim=-1)
+        y = a.matmul(V)
+        return y
 
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, n_head, d_input, d_attn, d_out):
+        super(MultiHeadSelfAttention, self).__init__()
+        self.linear_q = nn.Linear(d_input, n_head * d_attn)
+        self.linear_k = nn.Linear(d_input, n_head * d_attn)
+        self.linear_v = nn.Linear(d_input, n_head * d_attn)
+        self.attn = GeneralAttention()
+        self.out = nn.Linear(n_head * d_attn, d_out)
     def forward(self, inputs):
         #pdb.set_trace()
         q = self.linear_q(inputs)
         k = self.linear_k(inputs)
         v = self.linear_v(inputs)
-        e = q.matmul(k.transpose(-1,-2)) / k.var().sqrt()
-        a = F.softmax(e, dim=2)
-        x = a.matmul(v)
+
+        x = self.attn(q, k, v)
         x = self.out(x)
         return x
 
@@ -55,7 +66,7 @@ class NerBiLSTMAttn(nn.Module):
         self.attention = attention
         self.emb = nn.Embedding(num_embeddings, embedding_dim)
         self.lstm= nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, batch_first=False, dropout=dropout_p, bidirectional=True)
-        self.attn= MultiHeadSelfAttention(n_head=8, d_input=2*hidden_dim, d_attn_weight=2*hidden_dim, d_model=2*hidden_dim)
+        self.attn= MultiHeadSelfAttention(n_head=8, d_input=2*hidden_dim, d_attn=2*hidden_dim, d_out=2*hidden_dim)
         if self.attention:
             out_in_dim = 4*hidden_dim
         else:
@@ -125,50 +136,49 @@ if __name__ == "__main__":
                                  device=device)
 
     model = NerBiLSTMAttn(num_embeddings=len(SEN.vocab), embedding_dim=embedding_dim, hidden_dim=hidden_size, out_classes=8, attention=True)
-    model = model.to(device)
-    def init_weights(m):
-        for name, param in m.named_parameters():
-            nn.init.uniform_(param.data, -0.08, 0.08)
-    model.apply(init_weights)
-    # model = model.half()
-    criterion = nn.NLLLoss(ignore_index = 1)
-    criterion = criterion.to(device)
-    # criterion = criterion.half()
-    optimizer = optim.Adam(model.parameters(), lr=lr, eps=adam_eps)
+    #model = model.to(device)
+    #def init_weights(m):
+    #    for name, param in m.named_parameters():
+    #        nn.init.uniform_(param.data, -0.08, 0.08)
+    #model.apply(init_weights)
+    ## model = model.half()
+    #criterion = nn.NLLLoss(ignore_index = 1)
+    #criterion = criterion.to(device)
+    ## criterion = criterion.half()
+    #optimizer = optim.Adam(model.parameters(), lr=lr, eps=adam_eps)
     #pdb.set_trace()
+
+    app = Trainer(App(model=model, criterion=nn.NLLLoss(ignore_index=SEN.vocab.stoi["<pad>"])))
 
     def itos(s):
         s.transpose(0,1)
         return [" ".join([SEN.vocab.itos[ix] for ix in sent]) for sent in s]
 
-    @train(model, criterion, optimizer, train_iter, epochs, device=device, immediate=False, checkpoint=True, verbose=False)
-    def ner_train(model, criterion, data):
-        sent, label = data.sen, data.tag
-        y_predict = model(sent)
-        loss = torch.tensor([0.0]).cuda()
+    #@train(model, criterion, optimizer, train_iter, epochs, device=device, immediate=False, checkpoint=True, verbose=False)
+    @app.on("train")
+    def ner_train(e):
+        e.model.zero_grad()
+        sent, label = e.batch.sen, e.batch.tag
+        y_predict = e.model(sent)
+        loss = 0.0
         label = label[0]
         # pdb.set_trace()
         try:
             for i in range(label.size(0)):
-               loss += criterion(y_predict[i], label[i])
+               loss += e.criterion(y_predict[i], label[i])
         except Exception as e:
             pdb.set_trace()
         #import pdb; pdb.set_trace()
-        return y_predict, loss
+        loss.backward()
+        e.optimizer.step()
 
-    def ner_eval(model, criterion, optimizer):
-        state = torch.load(f"checkpoint/NerBiLSTMAttn.{4}.torch")
-        model.load_state_dict(state["model"])
-        model = model.to(device)
-        criterion = criterion.to(device)
-        optimizer.load_state_dict(state["optim"])
-
+    def ner_eval(app, test_iter):
         with torch.no_grad():
             for i,data in tqdm(enumerate(test_iter)):
                 #pdb.set_trace()
                 sent, label = data.sen, data.tag
                 # y_predict: (seq_len, batch, classes)
-                y_predict = model(sent)
+                y_predict = app.model(sent)
                 y_predict = y_predict.transpose(0,1)
                 sent = sent[0]
                 label = label[0]
@@ -182,6 +192,12 @@ if __name__ == "__main__":
                     print("S: " + " ".join(s_in))
                     print("T: " + " ".join(t_out))
                     print("D: " + " ".join(s_out))
-    
-    ner_train()
-    ner_eval(model, criterion, optimizer)
+
+    app.fastforward()   \
+       .save_every(iters=1000)  \
+       .set_optimizer(optim.Adam, lr=0.0003, eps=1e-4) \
+       .to("auto")  \
+       .half()  \
+       .run(train_iter, max_iters=4000, train=True)
+
+    ner_eval(app, test_iter)
