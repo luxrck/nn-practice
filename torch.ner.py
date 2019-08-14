@@ -1,6 +1,7 @@
 import random
 import re
 import sys
+import math
 import os
 import csv
 from functools import reduce
@@ -33,10 +34,13 @@ class GeneralAttention(nn.Module):
     def __init__(self):
         super(GeneralAttention, self).__init__()
     def forward(self, Q, K, V, mask=None):
-        e = Q.matmul(K.transpose(-1, -2))
-        e = e / K.var().sqrt()
+        # mmp! d_k指的是`dimention k`, 不是`D_k(k的方差)`
+        d_k = Q.size(-1)
+        e = Q.matmul(K.transpose(-1, -2)) / math.sqrt(d_k)
         if mask is not None:
-            e = e.dot(mask)
+            masked = -2**15 if Q.dtype == torch.float16 else -2**31
+            e.masked_fill_(mask == 0, -2**15)
+        #pdb.set_trace()
         a = F.softmax(e, dim=-1)
         y = a.matmul(V)
         return y
@@ -49,13 +53,13 @@ class MultiHeadSelfAttention(nn.Module):
         self.linear_v = nn.Linear(d_input, n_head * d_attn)
         self.attn = GeneralAttention()
         self.out = nn.Linear(n_head * d_attn, d_out)
-    def forward(self, inputs):
+    def forward(self, inputs, mask=None):
         #pdb.set_trace()
         q = self.linear_q(inputs)
         k = self.linear_k(inputs)
         v = self.linear_v(inputs)
 
-        x = self.attn(q, k, v)
+        x = self.attn(q, k, v, mask=mask)
         x = self.out(x)
         return x
 
@@ -87,7 +91,12 @@ class NerBiLSTMAttn(nn.Module):
         oh, lengths_list = unpack(packed_oh)
         oh = oh.transpose(0,1)
         if self.attention:
-            wh = self.attn(oh)
+            seq_len = oh.size(1)
+            mask = torch.zeros(seq_len, seq_len).type(torch.long).to(oh.device)
+            for i in range(seq_len):
+                mask[i,:i] = 1
+            #import pdb; pdb.set_trace()
+            wh = self.attn(oh, mask=mask)
             # wh = wh.transpose(0,1)
             x = torch.cat([oh, wh], dim=2)
         else:
@@ -99,15 +108,11 @@ class NerBiLSTMAttn(nn.Module):
 
 
 if __name__ == "__main__":
-    lr = 0.0004
-    adam_eps = 1e-4
     batch_size = 64
-    epochs = 10
-    num_layers = 1
     embedding_dim = 200
     hidden_size = 200
-    #max_padding_sentence_len = 20
     dropout_p = 0.5
+    attention=True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     SEN = Field(include_lengths=True,
@@ -120,7 +125,7 @@ if __name__ == "__main__":
                 unk_token=None,
                 tokenize=lambda x: x.split(),
                 lower=True)
-    _train, _test = TabularDataset.splits(path="data/conll/CoNLL-2003", root="data", train="train.tsv", test="testa.tsv", format='tsv', skip_header=False, fields=[("sen", SEN), ("tag", TAG)], csv_reader_params={"quoting": csv.QUOTE_NONE})
+    _train, _test = TabularDataset.splits(path="data/conll/CoNLL-2003", root="data", train="train.tsv", test="test.tsv", format='tsv', skip_header=False, fields=[("sen", SEN), ("tag", TAG)], csv_reader_params={"quoting": csv.QUOTE_NONE})
     SEN.build_vocab(_train)
     TAG.build_vocab(_train, min_freq=1)
     # pdb.set_trace()
@@ -135,7 +140,7 @@ if __name__ == "__main__":
                                  repeat=False,
                                  device=device)
 
-    model = NerBiLSTMAttn(num_embeddings=len(SEN.vocab), embedding_dim=embedding_dim, hidden_dim=hidden_size, out_classes=8, attention=True)
+    model = NerBiLSTMAttn(num_embeddings=len(SEN.vocab), embedding_dim=embedding_dim, hidden_dim=hidden_size, out_classes=9, attention=attention)
     #model = model.to(device)
     #def init_weights(m):
     #    for name, param in m.named_parameters():
@@ -149,6 +154,7 @@ if __name__ == "__main__":
     #pdb.set_trace()
 
     app = Trainer(App(model=model, criterion=nn.NLLLoss(ignore_index=SEN.vocab.stoi["<pad>"])))
+    app.extend(Checkpoint())
 
     def itos(s):
         s.transpose(0,1)
@@ -158,19 +164,20 @@ if __name__ == "__main__":
     @app.on("train")
     def ner_train(e):
         e.model.zero_grad()
+        #pdb.set_trace()
         sent, label = e.batch.sen, e.batch.tag
         y_predict = e.model(sent)
-        loss = 0.0
         label = label[0]
-        # pdb.set_trace()
+        #pdb.set_trace()
         try:
+            loss = 0.0
             for i in range(label.size(0)):
                loss += e.criterion(y_predict[i], label[i])
+            loss.backward()
+            e.optimizer.step()
         except Exception as e:
             pdb.set_trace()
         #import pdb; pdb.set_trace()
-        loss.backward()
-        e.optimizer.step()
 
     def ner_eval(app, test_iter):
         with torch.no_grad():
@@ -194,10 +201,10 @@ if __name__ == "__main__":
                     print("D: " + " ".join(s_out))
 
     app.fastforward()   \
-       .save_every(iters=1000)  \
+       .save_every(iters=5000)  \
        .set_optimizer(optim.Adam, lr=0.0003, eps=1e-4) \
        .to("auto")  \
        .half()  \
-       .run(train_iter, max_iters=4000, train=True)
+       .run(train_iter, max_iters=40000, train=True)
 
     ner_eval(app, test_iter)
