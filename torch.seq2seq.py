@@ -21,6 +21,7 @@ from torchnlp.metrics import bleu
 import numpy as np
 import spacy
 
+from ash.models import Transformer
 from ash.train import App, Trainer, Checkpoint
 
 
@@ -146,36 +147,53 @@ if __name__ == "__main__":
                                  device=device)
     test_iter = BucketIterator(_test, batch_size=1, train=False, repeat=False, device=device)
 
-    model = Seq2Seq(SRC, TRG, src_vocab_size=len(SRC.vocab), trg_vocab_size=len(TRG.vocab), embedding_dim=256, hidden_size=512, dropout_p=0.5, attention=True)
+    #model = Seq2Seq(SRC, TRG, src_vocab_size=len(SRC.vocab), trg_vocab_size=len(TRG.vocab), embedding_dim=256, hidden_size=512, dropout_p=0.5, attention=True)
     def init_weights(m):
         for name, param in m.named_parameters():
             nn.init.uniform_(param.data, -0.08, 0.08)
-    model.apply(init_weights)
 
-    app = Trainer(App(model=model,
-                      criterion=nn.NLLLoss(ignore_index=TRG.vocab.stoi['<pad>'])))
+    model_t = Transformer(len(SRC.vocab), len(TRG.vocab), d_model=512, n_encoder_layers=2, n_decoder_layers=2, dropout_p=0.1)
+    #model_t.apply(init_weights)
+
+    criterion = nn.CrossEntropyLoss(ignore_index=TRG.vocab.stoi['<pad>'])
+    app = Trainer(App(model=model_t,
+                      criterion=criterion))
     app.extend(Checkpoint())
 
     @app.on("train")
     def nmt_train(e):
         e.model.zero_grad()
         (src, lengths_src), (targets, lengths_trg) = e.batch.src, e.batch.trg
-        y_predict = e.model(src, targets, lengths_src, lengths_trg, teacher_forcing_p=0.9)
+        #import pdb; pdb.set_trace()
+        y_predict = e.model(src, targets, lengths_src, lengths_trg)
         targets = targets.transpose(0, 1)
         loss = 0.0 #torch.tensor([0.0]).type(y_predict.dtype)
+        # import pdb; pdb.set_trace()
         for i in range(targets.size(0)):
-           loss += e.criterion(y_predict[i], targets[i])
+            loss += e.criterion(y_predict[i,:-1,:], targets[i,1:])
+        # import pdb; pdb.set_trace()
         loss.backward()
         e.optimizer.step()
+        print(loss.item())
 
     # test_iter的batch_size=1
     @app.on("evaluate")
     def nmt_eval(e):
         (src, lengths_src), (targets, lengths_trg) = e.batch.src, e.batch.trg
+        #import pdb; pdb.set_trace()
         # set `teacher_forcing_p < 0` to indicate that we are in `evaluate` mode.
-        decode_output = e.model(src, targets, lengths_src, lengths_trg, max_len=128, teacher_forcing_p=-1)
-        decode_output = decode_output.topk(1)[1].view(-1).tolist()
-        decode_output = [TRG.vocab.itos[i] for i in decode_output]
+        decoded = [TRG.vocab.stoi['<sos>']]
+        import pdb; pdb.set_trace()
+        for _ in range(128):
+            trg = torch.tensor([decoded]).to(src.device)
+            trg = trg.view(-1, 1)
+            lengths_trg = torch.tensor([trg.size(0)]).to(src.device)
+            y_predict = e.model(src, trg, lengths_src, lengths_trg)
+            y_predict = y_predict.topk(1)[1].view(-1).tolist()
+            decoded.append(y_predict[-1])
+            if decoded[-1] == TRG.vocab.stoi['<eos>']:
+                break
+        decode_output = [TRG.vocab.itos[i] for i in decoded]
         targets = list(targets.view(-1))
         targets = [TRG.vocab.itos[i] for i in targets]
         print("T:", " ".join(targets))
@@ -183,9 +201,9 @@ if __name__ == "__main__":
         return decode_output, targets
 
     app.fastforward()   \
-       .set_optimizer(optim.Adam, lr=0.0004, eps=1e-4)  \
+       .set_optimizer(optim.Adam, lr=0.0004, eps=1e-3)  \
        .to("auto")  \
-       .save_every(iters=1000)  \
+       .save_every(iters=100)  \
        .half()  \
-       .run(train_iter, max_iters=10000, train=True)   \
+       .run(train_iter, max_iters=1, train=True)   \
        .eval(test_iter)

@@ -26,42 +26,10 @@ from gensim import corpora
 
 from ash.utils import train, test
 from ash.train import App, Trainer, Checkpoint
+from ash.modules.attention import MultiHeadAttention
 
 import pdb
 
-
-class GeneralAttention(nn.Module):
-    def __init__(self):
-        super(GeneralAttention, self).__init__()
-    def forward(self, Q, K, V, mask=None):
-        # mmp! d_k指的是`dimention k`, 不是`D_k(k的方差)`
-        d_k = Q.size(-1)
-        e = Q.matmul(K.transpose(-1, -2)) / math.sqrt(d_k)
-        if mask is not None:
-            masked = -2**15 if Q.dtype == torch.float16 else -2**31
-            e.masked_fill_(mask == 0, -2**15)
-        #pdb.set_trace()
-        a = F.softmax(e, dim=-1)
-        y = a.matmul(V)
-        return y
-
-class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, n_head, d_input, d_attn, d_out):
-        super(MultiHeadSelfAttention, self).__init__()
-        self.linear_q = nn.Linear(d_input, n_head * d_attn)
-        self.linear_k = nn.Linear(d_input, n_head * d_attn)
-        self.linear_v = nn.Linear(d_input, n_head * d_attn)
-        self.attn = GeneralAttention()
-        self.out = nn.Linear(n_head * d_attn, d_out)
-    def forward(self, inputs, mask=None):
-        #pdb.set_trace()
-        q = self.linear_q(inputs)
-        k = self.linear_k(inputs)
-        v = self.linear_v(inputs)
-
-        x = self.attn(q, k, v, mask=mask)
-        x = self.out(x)
-        return x
 
 
 class NerBiLSTMAttn(nn.Module):
@@ -70,13 +38,13 @@ class NerBiLSTMAttn(nn.Module):
         self.attention = attention
         self.emb = nn.Embedding(num_embeddings, embedding_dim)
         self.lstm= nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, batch_first=False, dropout=dropout_p, bidirectional=True)
-        self.attn= MultiHeadSelfAttention(n_head=8, d_input=2*hidden_dim, d_attn=2*hidden_dim, d_out=2*hidden_dim)
+        self.attn= MultiHeadAttention(n_head=8, d_input=2*hidden_dim, d_attn=2*hidden_dim, d_out=2*hidden_dim)
         if self.attention:
             out_in_dim = 4*hidden_dim
         else:
             out_in_dim = 2*hidden_dim
         self.nn = nn.Sequential(
-                nn.Linear(out_in_dim, out_in_dim),
+                    nn.Linear(out_in_dim, out_in_dim),
                     nn.Dropout(p=dropout_p),
                     nn.ReLU(),
                     nn.Linear(out_in_dim, out_classes),

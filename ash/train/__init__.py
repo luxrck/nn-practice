@@ -131,10 +131,12 @@ class Trainer(object):
         with torch.no_grad():
             for _,batch in tqdm(enumerate(data)):
                 # TODO: Not a good implementation...
-                y_predicted, targets = self.exec_handles("evaluate",
+                results = self.exec_handles("evaluate",
                                                  Trainer.Event(name="evaluate", trainer=self, batch=batch, model=self.model, criterion=self.criterion, optimizer=self.optimizer))[0]
-                oy_p.append(y_predicted)
-                oy.append(targets)
+                if results is not None and len(results) == 2:
+                    y_predicted, targets = results
+                    oy_p.append(y_predicted)
+                    oy.append(targets)
         return oy_p, oy
 
     def run(self, data, max_iters=1000, train=True):

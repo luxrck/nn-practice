@@ -6,6 +6,7 @@ import sys
 
 from torchtext.data.iterator import Iterator
 
+
 # We will exec `fn` immediately instead of return a wrapper function
 def train(model, criterion, optimizer, dataloader, epochs, device=None, half=False, checkpoint=None, validation=None, immediate=False, verbose=False, fn=None):
     start = 0
