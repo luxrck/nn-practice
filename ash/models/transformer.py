@@ -5,7 +5,7 @@ import torch
 from torch import nn, optim
 import torch.nn.functional as F
 
-from ash.modules.attention import MultiHeadAttention, attn_padding_mask, attn_subsequence_mask
+from ash.modules.attention import MultiHeadAttention, attn_padding_mask, attn_subsequent_mask
 from .encoder_decoder import EncoderDecoder
 
 
@@ -26,7 +26,7 @@ class PositionalEncoding(nn.Module):
 
         self.register_buffer("pe", pe)
 
-    # inputs: (batch, max_len, d_input)
+    # inputs: (batch, seq_len, d_input)
     def forward(self, inputs):
         inputs += torch.autograd.Variable(self.pe[:, :inputs.size(1)], requires_grad=False)
         inputs = self.dropout(inputs)
@@ -50,13 +50,17 @@ class PositionwiseFFN(nn.Module):
 class TransformerEncoderLayer(nn.Module):
     def __init__(self, d_input, dropout_p=0.1):
         super(TransformerEncoderLayer, self).__init__()
+        ##self.attn = MultiHeadAttention(n_head=8, d_model=d_input, d_k=d_input, d_v=d_input)
         self.attn = MultiHeadAttention(n_head=8, d_input=d_input, d_attn=d_input*2, d_out=d_input)
         self.a_norm = nn.LayerNorm(normalized_shape=d_input)
         self.dropout1 = nn.Dropout(p=dropout_p)
+       
         self.pffn = PositionwiseFFN(d_input=d_input, d_out=d_input, dropout_p=dropout_p)
         self.f_norm = nn.LayerNorm(normalized_shape=d_input)
         self.dropout2 = nn.Dropout(p=dropout_p)
+    
     def forward(self, x, mask=None):
+        #import pdb; pdb.set_trace()
         y = self.attn(x, x, x, mask=mask)
         y = self.dropout1(y)
         x = self.a_norm(x + y)
@@ -79,20 +83,23 @@ class TransformerEncoder(nn.Module):
     def forward(self, x, lengths=None):
         x = x.transpose(0, 1)
         x = self.emb(x)
+        x = self.positional_encoding(x)
         mask = attn_padding_mask(lengths, lengths) if lengths is not None else None
-        x += self.positional_encoding(x)
         for encoder in self.encoders:
             x = encoder(x, mask)
+        #import pdb; pdb.set_trace()
         return x
 
 
 class TransformerDecoderLayer(nn.Module):
     def __init__(self, d_input, dropout_p=0.1):
         super(TransformerDecoderLayer, self).__init__()
+        #self.self_attn = MultiHeadAttention(n_head=8, d_model=d_input, d_k=d_input, d_v=d_input)
         self.self_attn = MultiHeadAttention(n_head=8, d_input=d_input, d_attn=d_input*2, d_out=d_input)
         self.self_norm = nn.LayerNorm(normalized_shape=d_input)
         self.dropout1 = nn.Dropout(p=dropout_p)
 
+        #self.src_attn = MultiHeadAttention(n_head=8, d_model=d_input, d_k=d_input, d_v=d_input)
         self.src_attn = MultiHeadAttention(n_head=8, d_input=d_input, d_attn=d_input*2, d_out=d_input)
         self.src_norm = nn.LayerNorm(normalized_shape=d_input)
         self.dropout2 = nn.Dropout(p=dropout_p)
@@ -102,7 +109,7 @@ class TransformerDecoderLayer(nn.Module):
         self.dropout3 = nn.Dropout(p=dropout_p)
 
     def forward(self, x, src_encoded, src_mask=None, trg_mask=None):
-        # import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         y = self.self_attn(x, x, x, mask=trg_mask)
         y = self.dropout1(y)
         x = self.self_norm(x + y)
@@ -127,14 +134,16 @@ class TransformerDecoder(nn.Module):
     def forward(self, x, src_encoded, src_lengths=None, trg_lengths=None):
         x = x.transpose(0, 1)
         x = self.emb(x)
+        x = self.positional_encoding(x)
         # import pdb; pdb.set_trace()
         src_mask = attn_padding_mask(query_len=trg_lengths, key_len=src_lengths) if src_lengths is not None else None
-        trg_mask = attn_subsequence_mask(trg_lengths) if trg_lengths is not None else None
+        trg_mask = attn_subsequent_mask(trg_lengths) if trg_lengths is not None else None
         for i,decoder in enumerate(self.decoders):
-            print("transformer:", i)
-            import pdb; pdb.set_trace()
+            #print("transformer:", i)
+            #import pdb; pdb.set_trace()
             x = decoder(x, src_encoded, src_mask, trg_mask)
             # decoded_mask = sequence_mask()
+        #import pdb; pdb.set_trace()
         return x
 
 
@@ -152,5 +161,5 @@ class Transformer(nn.Module):
         # import pdb; pdb.set_trace()
         x = self.encoder_decoder(src, trg, src_len, trg_len)
         x = self.out(x)
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         return x

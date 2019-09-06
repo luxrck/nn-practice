@@ -3,6 +3,7 @@ data
 paper
 notes
 checkpoint
+log
 
 *.pyc
 *.tar.*
