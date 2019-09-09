@@ -151,7 +151,7 @@ if __name__ == "__main__":
         for name, param in m.named_parameters():
             nn.init.uniform_(param.data, -0.08, 0.08)
 
-    model_t = Transformer(len(SRC.vocab), len(TRG.vocab), d_model=256, n_encoder_layers=3, n_decoder_layers=1, dropout_p=0.1)
+    model_t = Transformer(len(SRC.vocab), len(TRG.vocab), d_model=256, n_encoder_layers=2, n_decoder_layers=2, dropout_p=0.1)
     #model_t.apply(init_weights)
 
     criterion = nn.CrossEntropyLoss(ignore_index=TRG.vocab.stoi['<pad>'], reduction="sum")
@@ -201,8 +201,9 @@ if __name__ == "__main__":
             #import pdb; pdb.set_trace()
             y_predict = e.model(src, trg, lengths_src, lengths_trg)
             #import pdb; pdb.set_trace()
-            y_predict = y_predict.topk(3)[1].view(-1, 3).tolist()
-            wo = y_predict[-1][1]
+            #y_predict = y_predict.topk(3)[1].view(-1, 3).tolist()
+            y_predict = y_predict.topk(1)[1].view(-1, 1).tolist()
+            wo = y_predict[-1][0]
             decoded.append(wo)
             if decoded[-1] == TRG.vocab.stoi['<eos>']:
                 break
@@ -217,5 +218,5 @@ if __name__ == "__main__":
        .set_optimizer(optim.Adam, lr=0.0004, eps=1e-6)  \
        .to("auto")  \
        .save_every(iters=2000)  \
-       .run(train_iter, max_iters=10000, train=True)   \
+       .run(train_iter, max_iters=6000, train=True)   \
        .eval(test_iter)

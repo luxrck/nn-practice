@@ -24,7 +24,7 @@ def attn_subsequent_mask(lengths):
     for i in range(attn_mask.size(0)):
         a = attn_mask[i]
         for j in range(a.size(0)):
-            a[:j+1, j] = 0
+            a[:j, j] = 0
     #import pdb; pdb.set_trace()
     return attn_mask
 
@@ -34,33 +34,50 @@ class GeneralAttention(nn.Module):
         super(GeneralAttention, self).__init__()
     def forward(self, Q, K, V, mask=None):
         # mmp! d_k指的是`dimention k`, 不是`D_k(k的方差)`
+        #import pdb; pdb.set_trace()
         d_k = Q.size(-1)
         e = Q.bmm(K.transpose(-1, -2)) / math.sqrt(d_k)
         if mask is not None:
-            masked = -2e4 if Q.dtype == torch.float16 else -2**30
-            e.masked_fill_(mask == 0, -2**15)
+            masked = -20000 if Q.dtype == torch.float16 else -2**30
+            e.masked_fill_(mask == 0, masked)
         #pdb.set_trace()
+        #import pdb; pdb.set_trace()
         a = F.softmax(e, dim=-1)
         y = a.bmm(V)
+        #import pdb; pdb.set_trace()
         return y
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, n_head, d_input, d_attn, d_out):
+    # d_model: 输入和输出的向量维度
+    def __init__(self, n_head, d_model, d_k, d_v):
         super(MultiHeadAttention, self).__init__()
-        self.linear_q = nn.Linear(d_input, n_head * d_attn)
-        self.linear_k = nn.Linear(d_input, n_head * d_attn)
-        self.linear_v = nn.Linear(d_input, n_head * d_attn)
+        self.n_head = n_head
+        self.linear_q = nn.Linear(d_k, n_head * d_k)    # d_q == d_k
+        self.linear_k = nn.Linear(d_k, n_head * d_k)
+        self.linear_v = nn.Linear(d_v, n_head * d_v)
         self.attn = GeneralAttention()
-        self.out = nn.Linear(n_head * d_attn, d_out)
+        self.out = nn.Linear(n_head * d_v, d_model)
     def forward(self, q, k, v, mask=None):
-        # import pdb; pdb.set_trace()
-        #pdb.set_trace()
-        q = self.linear_q(q)
-        k = self.linear_k(k)
-        v = self.linear_v(v)
+        #import pdb; pdb.set_trace()
+        batch_size = q.size(0)
+        n_head = self.n_head
+        
+        seq_q = q.size(1)
+        seq_k = k.size(1)
+        seq_v = v.size(1)
 
+        d_q = q.size(2)
+        d_k = k.size(2)
+        d_v = v.size(2)
+
+        q = self.linear_q(q).view(batch_size, seq_q, n_head, d_q).contiguous().permute(2, 0, 1, 3).contiguous().view(-1, seq_q, d_q)
+        k = self.linear_q(k).view(batch_size, seq_k, n_head, d_k).contiguous().permute(2, 0, 1, 3).contiguous().view(-1, seq_k, d_k)
+        v = self.linear_q(v).view(batch_size, seq_v, n_head, d_v).contiguous().permute(2, 0, 1, 3).contiguous().view(-1, seq_v, d_v)
+
+        mask = mask.repeat(n_head, 1, 1)
         x = self.attn(q, k, v, mask=mask)
+        x = x.view(n_head, batch_size, seq_q, d_v).contiguous().permute(1, 2, 0, 3).contiguous().view(batch_size, seq_q, -1)
         x = self.out(x)
         return x
 

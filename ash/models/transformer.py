@@ -51,7 +51,7 @@ class TransformerEncoderLayer(nn.Module):
     def __init__(self, d_input, dropout_p=0.1):
         super(TransformerEncoderLayer, self).__init__()
         ##self.attn = MultiHeadAttention(n_head=8, d_model=d_input, d_k=d_input, d_v=d_input)
-        self.attn = MultiHeadAttention(n_head=8, d_input=d_input, d_attn=d_input*2, d_out=d_input)
+        self.attn = MultiHeadAttention(n_head=8, d_model=d_input, d_k=d_input, d_v=d_input)
         self.a_norm = nn.LayerNorm(normalized_shape=d_input)
         self.dropout1 = nn.Dropout(p=dropout_p)
        
@@ -95,12 +95,14 @@ class TransformerDecoderLayer(nn.Module):
     def __init__(self, d_input, dropout_p=0.1):
         super(TransformerDecoderLayer, self).__init__()
         #self.self_attn = MultiHeadAttention(n_head=8, d_model=d_input, d_k=d_input, d_v=d_input)
-        self.self_attn = MultiHeadAttention(n_head=8, d_input=d_input, d_attn=d_input*2, d_out=d_input)
+        self.self_attn = MultiHeadAttention(n_head=8, d_model=d_input, d_k=d_input, d_v=d_input)
+        #self.self_attn = MultiHeadAttention(n_head=8, d_input=d_input, d_attn=d_input*2, d_out=d_input)
         self.self_norm = nn.LayerNorm(normalized_shape=d_input)
         self.dropout1 = nn.Dropout(p=dropout_p)
 
         #self.src_attn = MultiHeadAttention(n_head=8, d_model=d_input, d_k=d_input, d_v=d_input)
-        self.src_attn = MultiHeadAttention(n_head=8, d_input=d_input, d_attn=d_input*2, d_out=d_input)
+        self.src_attn = MultiHeadAttention(n_head=8, d_model=d_input, d_k=d_input, d_v=d_input)
+        #self.src_attn = MultiHeadAttention(n_head=8, d_input=d_input, d_attn=d_input*2, d_out=d_input)
         self.src_norm = nn.LayerNorm(normalized_shape=d_input)
         self.dropout2 = nn.Dropout(p=dropout_p)
 
