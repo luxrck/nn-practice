@@ -141,17 +141,23 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_iter = BucketIterator(_train, batch_size=batch_size, train=True,
-                                 sort_within_batch=True,
-                                 sort_key=lambda x: (len(x.src), len(x.trg)), repeat=False,
+                                 repeat=False,
+                                 #sort_within_batch=True,
+                                 #sort_key=lambda x: (len(x.src), len(x.trg)), repeat=False,
                                  device=device)
     test_iter = BucketIterator(_test, batch_size=1, train=False, repeat=False, device=device)
 
     #model = Seq2Seq(SRC, TRG, src_vocab_size=len(SRC.vocab), trg_vocab_size=len(TRG.vocab), embedding_dim=256, hidden_size=512, dropout_p=0.5, attention=True)
     def init_weights(m):
         for name, param in m.named_parameters():
-            nn.init.uniform_(param.data, -0.08, 0.08)
+            if name == "weight" and len(param.data.size()) > 1:
+                try:
+                    nn.init.xavier_uniform_(param.data)
+                except:
+                    import pdb; pdb.set_trace()
 
-    model_t = Transformer(len(SRC.vocab), len(TRG.vocab), d_model=256, n_encoder_layers=2, n_decoder_layers=2, dropout_p=0.1)
+    model_t = Transformer(len(SRC.vocab), len(TRG.vocab), d_model=256, n_encoder_layers=3, n_decoder_layers=3, dropout_p=0.1)
+    # 参数初始化方式会对模型训练有这么大的影响？
     #model_t.apply(init_weights)
 
     criterion = nn.CrossEntropyLoss(ignore_index=TRG.vocab.stoi['<pad>'], reduction="sum")
@@ -215,8 +221,8 @@ if __name__ == "__main__":
         return decode_output, targets
 
     app.fastforward()   \
-       .set_optimizer(optim.Adam, lr=0.0004, eps=1e-6)  \
+       .set_optimizer(optim.Adam, lr=0.0004, eps=1e-9, betas=(0.9, 0.98))  \
        .to("auto")  \
-       .save_every(iters=2000)  \
-       .run(train_iter, max_iters=6000, train=True)   \
+       .save_every(iters=1000)  \
+       .run(train_iter, max_iters=10, train=False)   \
        .eval(test_iter)

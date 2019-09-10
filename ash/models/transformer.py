@@ -77,7 +77,7 @@ class TransformerEncoder(nn.Module):
         d_input = self.emb.embedding_dim
         self.positional_encoding = PositionalEncoding(d_input=d_input, dropout_p=dropout_p)
         self.encoders = nn.ModuleList([
-                            copy.deepcopy(TransformerEncoderLayer(d_input=d_input, dropout_p=dropout_p)) for _ in range(n_layers)])
+                            TransformerEncoderLayer(d_input=d_input, dropout_p=dropout_p) for _ in range(n_layers)])
 
     # x: (seq_len, batch, d_emb)
     def forward(self, x, lengths=None):
@@ -131,7 +131,7 @@ class TransformerDecoder(nn.Module):
         d_input = self.emb.embedding_dim
         self.positional_encoding = PositionalEncoding(d_input=d_input, dropout_p=dropout_p)
         self.decoders = nn.ModuleList([
-                            copy.deepcopy(TransformerDecoderLayer(d_input=d_input, dropout_p=dropout_p)) for _ in range(n_layers)])
+                            TransformerDecoderLayer(d_input=d_input, dropout_p=dropout_p) for _ in range(n_layers)])
 
     def forward(self, x, src_encoded, src_lengths=None, trg_lengths=None):
         x = x.transpose(0, 1)
