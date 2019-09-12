@@ -131,7 +131,7 @@ if __name__ == "__main__":
                 batch_first=False,
                 tokenize=lambda text: [t.text for t in spacy_src.tokenizer(text)])
     _train, _vali, _test = Multi30k.splits(root="data", exts=(".de", ".en"), fields=(SRC, TRG))
-    # It is important to note that your vocabulary should only be built from the training set
+    # It is important to ntote that your vocabulary should only be built from the training set
     # and not the validation/test set. This prevents "information leakage" into your model,
     # giving you artifically inflated validation/test scores.
     SRC.build_vocab(_train, min_freq=2)
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_iter = BucketIterator(_train, batch_size=batch_size, train=True,
-                                 repeat=False,
+                                 repeat=False, shuffle=True,
                                  #sort_within_batch=True,
                                  #sort_key=lambda x: (len(x.src), len(x.trg)), repeat=False,
                                  device=device)
@@ -151,13 +151,10 @@ if __name__ == "__main__":
     def init_weights(m):
         for name, param in m.named_parameters():
             if name == "weight" and len(param.data.size()) > 1:
-                try:
                     nn.init.xavier_uniform_(param.data)
-                except:
-                    import pdb; pdb.set_trace()
 
     model_t = Transformer(len(SRC.vocab), len(TRG.vocab), d_model=256, n_encoder_layers=3, n_decoder_layers=3, dropout_p=0.1)
-    # 参数初始化方式会对模型训练有这么大的影响？
+    # %% 参数初始化方式会对模型训练有这么大的影响？
     #model_t.apply(init_weights)
 
     criterion = nn.CrossEntropyLoss(ignore_index=TRG.vocab.stoi['<pad>'], reduction="sum")
@@ -175,8 +172,9 @@ if __name__ == "__main__":
         #targets, gold = targets[:-1,:], targets[1:,:]
         #lengths_trg -= 1
 
-        #import pdb; pdb.set_trace()
         y_predict = e.model(src, targets, lengths_src, lengths_trg)
+        #if e.current_iter % 50 == 0:
+        #    import pdb; pdb.set_trace()
         #targets = targets.transpose(0, 1)
 
         #y_predict = y_predict[:,:-1,:].contiguous().view(-1, y_predict.size(-1))
@@ -190,8 +188,19 @@ if __name__ == "__main__":
 
         loss = e.criterion(y_predict, gold)
         loss.backward()
+        # %% 梯度剪裁对模型训练有这么大的影响？
+        torch.nn.utils.clip_grad_norm_(e.model.parameters(), max_norm=2)
         e.optimizer.step()
         print(loss.item())
+
+    #@app.on("iter_completed")
+    def adjust_learning_rate(e):
+        step_num = e.current_iter
+        if step_num % 200: return
+        warmup_steps = 2000
+        lr = 256 ** (-0.5) * min([step_num ** (-0.5), step_num * warmup_steps ** (-1.5)])
+        for param_group in e.optimizer.param_groups:
+            param_group['lr'] = lr
 
     # test_iter的batch_size=1
     @app.on("evaluate")
@@ -220,9 +229,11 @@ if __name__ == "__main__":
         print("D:", " ".join(decode_output))
         return decode_output, targets
 
+       #.half()  \
     app.fastforward()   \
-       .set_optimizer(optim.Adam, lr=0.0004, eps=1e-9, betas=(0.9, 0.98))  \
+       .set_optimizer(optim.Adam, lr=0.0003, eps=1e-4, betas=(0.9, 0.98))  \
        .to("auto")  \
+       .half()  \
        .save_every(iters=1000)  \
-       .run(train_iter, max_iters=10, train=False)   \
+       .run(train_iter, max_iters=10000, train=True)   \
        .eval(test_iter)

@@ -12,19 +12,19 @@ def attn_padding_mask(query_len, key_len):
     row_max = query_len.max().item()
     out = []
     for i in range(batch_size):
-        a = torch.ones(query_len[i], key_len[i], device=query_len.device).type_as(query_len)
+        a = torch.zeros(query_len[i], key_len[i], dtype=torch.float32, device=query_len.device)
         lengths_pad = lengths_max - key_len[i]
         rows_pad = row_max - query_len[i]
-        a = F.pad(a, (0, lengths_pad, 0, rows_pad))
+        a = F.pad(a, (0, lengths_pad, 0, rows_pad), value=1.)
         out.append(a)
-    return torch.stack(out).type(torch.int8)
+    return torch.stack(out)
 
 def attn_subsequent_mask(lengths):
     attn_mask = attn_padding_mask(lengths, lengths)
     for i in range(attn_mask.size(0)):
         a = attn_mask[i]
         for j in range(a.size(0)):
-            a[:j, j] = 0
+            a[j, j+1:] = 1.
     #import pdb; pdb.set_trace()
     return attn_mask
 
@@ -38,8 +38,11 @@ class GeneralAttention(nn.Module):
         d_k = Q.size(-1)
         e = Q.bmm(K.transpose(-1, -2)) / math.sqrt(d_k)
         if mask is not None:
-            masked = -20000 if Q.dtype == torch.float16 else -2**30
-            e.masked_fill_(mask == 0, masked)
+            masked = -2**14 if Q.dtype == torch.float16 else -2**31
+            e.masked_fill_((mask - 1.).type(torch.bool).eq(False), masked)
+            #mask = mask.type(e.dtype).to(e.device)
+            #import pdb; pdb.set_trace()
+            #e += mask
         #pdb.set_trace()
         #import pdb; pdb.set_trace()
         a = F.softmax(e, dim=-1)

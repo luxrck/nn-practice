@@ -144,30 +144,28 @@ class Trainer(object):
         self.optimizer = self.optimizer_builder()
         
         meta = Trainer.Event(name="meta")
+        event= Trainer.Event(name="e", a=meta, trainer=self, model=self.model, criterion=self.criterion, optimizer=self.optimizer)
 
-        self.exec_handles("train_started",
-                           Trainer.Event(name="train_started", a=meta, trainer=self))
+        self.exec_handles("train_started", event)
 
         current_iter = self.current_iter
 
         if train == False:
-            self.exec_handles("train_completed",
-                               Trainer.Event(name="train_completed", a=meta, trainer=self))
+            self.exec_handles("train_completed", event)
             return self
 
         while current_iter < max_iters + 1:
             iterator = tqdm(enumerate(data))
             for i,batch in iterator:
-                self.exec_handles("iter_started",
-                                   Trainer.Event(name="iter_started", a=meta, trainer=self, current_iter=current_iter, batch=batch, model=self.model, criterion=self.criterion, optimizer=self.optimizer))
-                self.exec_handles("iter_completed",
-                                   Trainer.Event(name="iter_completed", a=meta, trainer=self, current_iter=current_iter))
+                event.current_iter = current_iter
+                event.batch = batch
+                self.exec_handles("iter_started", event)
+                self.exec_handles("iter_completed", event)
                 current_iter += 1
                 if current_iter >= max_iters + 1:
                     break
 
-        self.exec_handles("train_completed",
-                           Trainer.Event(name="train_completed", a=meta, trainer=self))
+        self.exec_handles("train_completed", event)
         return self
 
     # Called when the default attribute access fails with an AttributeError (either __getattribute__() raises an
