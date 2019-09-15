@@ -153,7 +153,7 @@ if __name__ == "__main__":
             if name == "weight" and len(param.data.size()) > 1:
                     nn.init.xavier_uniform_(param.data)
 
-    model_t = Transformer(len(SRC.vocab), len(TRG.vocab), d_model=256, n_encoder_layers=3, n_decoder_layers=3, dropout_p=0.1)
+    model_t = Transformer(len(SRC.vocab), len(TRG.vocab), d_model=256, n_encoder_layers=6, n_decoder_layers=6, dropout_p=0.1)
     # %% 参数初始化方式会对模型训练有这么大的影响？
     #model_t.apply(init_weights)
 
@@ -191,7 +191,11 @@ if __name__ == "__main__":
         # %% 梯度剪裁对模型训练有这么大的影响？
         torch.nn.utils.clip_grad_norm_(e.model.parameters(), max_norm=2)
         e.optimizer.step()
-        print(loss.item())
+        e.a.loss = loss.item()
+
+    @app.on("iter_completed")
+    def pront_loss(e):
+        e.progress.set_postfix(loss=e.a.loss)
 
     #@app.on("iter_completed")
     def adjust_learning_rate(e):
@@ -231,7 +235,7 @@ if __name__ == "__main__":
 
        #.half()  \
     app.fastforward()   \
-       .set_optimizer(optim.Adam, lr=0.0003, eps=1e-4, betas=(0.9, 0.98))  \
+       .set_optimizer(optim.Adam, lr=0.0001, eps=1e-4, betas=(0.9, 0.98))  \
        .to("auto")  \
        .half()  \
        .save_every(iters=1000)  \

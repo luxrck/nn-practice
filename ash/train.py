@@ -65,11 +65,10 @@ class Checkpoint(object):
     def save_every(self, iters=1000):
         @self.app.on("iter_completed")
         def save(e):
-            trainer = e.trainer
             current_iter = e.current_iter
             if current_iter % iters == 0:
-                torch.save({"start": current_iter + 1, "model": trainer.model.state_dict(), "optim": trainer.optimizer.state_dict()},
-                           os.path.join(self.checkpoint_root, f"{trainer.model.__class__.__name__}.{current_iter}.pt"))
+                torch.save({"start": current_iter + 1, "model": e.model.state_dict(), "optim": e.optimizer.state_dict()},
+                           os.path.join(self.checkpoint_root, f"{e.model.__class__.__name__}.{current_iter}.pt"))
         return self
 
 
@@ -144,18 +143,21 @@ class Trainer(object):
         self.optimizer = self.optimizer_builder()
         
         meta = Trainer.Event(name="meta")
-        event= Trainer.Event(name="e", a=meta, trainer=self, model=self.model, criterion=self.criterion, optimizer=self.optimizer)
+        progress = tqdm(total=max_iters, miniters=0)
+        event = Trainer.Event(name="e", a=meta, progress=progress, trainer=self, model=self.model, criterion=self.criterion, optimizer=self.optimizer)
 
         self.exec_handles("train_started", event)
 
         current_iter = self.current_iter
+        event.progress.n = current_iter
+        event.progress.last_print_n = current_iter
 
         if train == False:
             self.exec_handles("train_completed", event)
             return self
 
         while current_iter < max_iters + 1:
-            iterator = tqdm(enumerate(data))
+            iterator = enumerate(data)
             for i,batch in iterator:
                 event.current_iter = current_iter
                 event.batch = batch
@@ -164,7 +166,7 @@ class Trainer(object):
                 current_iter += 1
                 if current_iter >= max_iters + 1:
                     break
-
+                event.progress.update(1)
         self.exec_handles("train_completed", event)
         return self
 

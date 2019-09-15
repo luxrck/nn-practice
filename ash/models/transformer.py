@@ -34,14 +34,14 @@ class PositionalEncoding(nn.Module):
 
 
 class PositionwiseFFN(nn.Module):
-    def __init__(self, d_model, d_out, dropout_p):
+    def __init__(self, d_model, d_out, d_hidden=2048, dropout_p=0.1):
         super(PositionwiseFFN, self).__init__()
-        d_hidden = 2048
         self.ffn = nn.Sequential(
                         nn.Linear(d_model, d_hidden),
-                        nn.Dropout(p=dropout_p),
                         nn.ReLU(),
+                        nn.Dropout(p=dropout_p),
                         nn.Linear(d_hidden, d_out))
+
     def forward(self, inputs):
         x = self.ffn(inputs)
         return x
@@ -146,24 +146,20 @@ class Transformer(nn.Module):
         #self.encoder_decoder = nn.Transformer(d_model=d_model, num_encoder_layers=n_encoder_layers, num_decoder_layers=n_decoder_layers)
         self.out = nn.Sequential(
                     nn.Linear(d_model, d_model * 2),
-                    nn.Dropout(p=dropout_p),
                     nn.ReLU(),
+                    nn.Dropout(p=dropout_p),
                     nn.Linear(d_model * 2, trg_vocab_size))
 
         #self._reset_parameters()
 
     # pytorch/transformer
+    # %% 参数初始化方式会对模型训练有这么大的影响？
+    # 答: 是的！
     def _reset_parameters(self):
         for p in self.parameters():
             if p.dim() > 1:
-                nn.init.xavier_uniform_(p)
-    def gen_mask(self, sz):
-        r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
-            Unmasked positions are filled with float(0.0).
-        """
-        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-        return mask
+                # 这是Linear层Weight的默认初始化方式
+                nn.init.kaiming_uniform_(p, nonlinearity="leaky_relu")
 
     def forward(self, src, trg, src_lengths=None, trg_lengths=None):
         src = self.src_embeddings(src)
@@ -176,6 +172,9 @@ class Transformer(nn.Module):
         src_mask = attn_padding_mask(query_len=src_lengths, key_len=src_lengths) if src_lengths is not None else None
         trg_mask = attn_subsequent_mask(trg_lengths) if trg_lengths is not None else None
         mem_mask = attn_padding_mask(query_len=trg_lengths, key_len=src_lengths) if src_lengths is not None else None
+
+        #src_mask = None
+        #mem_mask = None
         x = self.encoder_decoder(src, trg, src_mask, trg_mask, mem_mask)
 
         #trg_mask = self.gen_mask(trg_lengths.topk(1)[0]).to(src_mask.device)
