@@ -152,7 +152,6 @@ class Transformer(nn.Module):
 
         #self._reset_parameters()
 
-    # pytorch/transformer
     # %% 参数初始化方式会对模型训练有这么大的影响？
     # 答: 是的！
     def _reset_parameters(self):

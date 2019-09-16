@@ -4,6 +4,7 @@ paper
 notes
 checkpoint
 log
+save
 
 *.pyc
 *.tar.*

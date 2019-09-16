@@ -67,9 +67,9 @@ if __name__ == "__main__":
     #import pdb; pdb.set_trace()
 
     #model = Seq2Seq(SRC, TRG, src_vocab_size=len(SRC.vocab), trg_vocab_size=len(TRG.vocab), embedding_dim=256, hidden_size=512, dropout_p=0.5, attention=True)
-    model_t = Transformer(len(SRC.vocab), len(TRG.vocab), d_model=d_model, n_encoder_layers=1, n_decoder_layers=1, dropout_p=0.1)
+    model_t = Transformer(len(SRC.vocab), len(TRG.vocab), d_model=d_model, n_encoder_layers=6, n_decoder_layers=6, dropout_p=0.1)
 
-    criterion = nn.CrossEntropyLoss(ignore_index=TRG.vocab.stoi['<pad>'], reduction="mean")
+    criterion = nn.CrossEntropyLoss(ignore_index=TRG.vocab.stoi['<pad>'], reduction="sum")
     app = Trainer(App(model=model_t,
                       criterion=criterion))
     app.extend(Checkpoint())
@@ -104,10 +104,13 @@ if __name__ == "__main__":
         # %% 梯度剪裁对模型训练有这么大的影响？
         torch.nn.utils.clip_grad_norm_(e.model.parameters(), max_norm=2)
         e.optimizer.step()
-        print(loss.item())
+        e.a.loss = loss.item()
 
-    
     @app.on("iter_completed")
+    def pront_loss(e):
+        e.progress.set_postfix(loss=e.a.loss)
+    
+    #@app.on("iter_completed")
     def adjust_learning_rate(e):
         step_num = e.current_iter
         if step_num % 200: return
@@ -155,5 +158,5 @@ if __name__ == "__main__":
        .to("auto")  \
        .half()  \
        .save_every(iters=1000)  \
-       .run(train_iter, max_iters=1000, train=True)   \
+       .run(train_iter, max_iters=1000, train=False)   \
        .eval(test_iter)
