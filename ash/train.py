@@ -106,12 +106,14 @@ class Trainer(object):
     def exec_handles(self, on_event, e):
         return list(map(lambda h: h(e), self.event_map[on_event]))
 
-    def on(self, event):
-        def event_wrapper(event_handler):
+    def on(self, event, handler=None):
+        def event_wrapper(handler):
             def inner_event_wrapper(*args, **kwargs):
-                return event_handler(*args, **kwargs)
+                return handler(*args, **kwargs)
             self.event_map[event].add(inner_event_wrapper)
             return inner_event_wrapper
+        if handler is not None:
+            return event_wrapper(handler)
         return event_wrapper
 
     def set_optimizer(self, op, *args, **kwargs):

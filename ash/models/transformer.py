@@ -48,15 +48,15 @@ class PositionwiseFFN(nn.Module):
 
 
 class TransformerEncoderLayer(nn.Module):
-    def __init__(self, d_model, dropout_p=0.1):
+    def __init__(self, d_model, n_head=8, d_ffn=2048, layernorm_eps=1e-3, dropout_p=0.1):
         super(TransformerEncoderLayer, self).__init__()
         ##self.attn = MultiHeadAttention(n_head=8, d_model=d_model, d_k=d_model, d_v=d_model)
-        self.attn = MultiHeadAttention(n_head=8, d_model=d_model, d_k=d_model, d_v=d_model)
-        self.a_norm = nn.LayerNorm(normalized_shape=d_model, eps=1e-3)
+        self.attn = MultiHeadAttention(n_head=n_head, d_model=d_model, d_k=d_model, d_v=d_model)
+        self.a_norm = nn.LayerNorm(normalized_shape=d_model, eps=layernorm_eps)
         self.dropout1 = nn.Dropout(p=dropout_p)
        
-        self.pffn = PositionwiseFFN(d_model=d_model, d_out=d_model, dropout_p=dropout_p)
-        self.f_norm = nn.LayerNorm(normalized_shape=d_model, eps=1e-3)
+        self.pffn = PositionwiseFFN(d_model=d_model, d_out=d_model, d_hidden=d_ffn, dropout_p=dropout_p)
+        self.f_norm = nn.LayerNorm(normalized_shape=d_model, eps=layernorm_eps)
         self.dropout2 = nn.Dropout(p=dropout_p)
     
     def forward(self, x, mask=None):
@@ -71,10 +71,10 @@ class TransformerEncoderLayer(nn.Module):
 
 
 class TransformerEncoder(nn.Module):
-    def __init__(self, d_model, n_layers=6, dropout_p=0.1):
+    def __init__(self, d_model, n_head=8, n_layers=6, d_ffn=2048, layernorm_eps=1e-3, dropout_p=0.1):
         super(TransformerEncoder, self).__init__()
         self.encoders = nn.ModuleList([
-                            TransformerEncoderLayer(d_model=d_model, dropout_p=dropout_p) for _ in range(n_layers)])
+                            TransformerEncoderLayer(d_model=d_model, n_head=n_head, d_ffn=d_ffn, layernorm_eps=layernorm_eps, dropout_p=dropout_p) for _ in range(n_layers)])
 
     # x: (seq_len, batch, d_emb)
     def forward(self, x, mask=None):
@@ -85,22 +85,22 @@ class TransformerEncoder(nn.Module):
 
 
 class TransformerDecoderLayer(nn.Module):
-    def __init__(self, d_model, dropout_p=0.1):
+    def __init__(self, d_model, n_head=8, d_ffn=2048, layernorm_eps=1e-3, dropout_p=0.1):
         super(TransformerDecoderLayer, self).__init__()
         #self.self_attn = MultiHeadAttention(n_head=8, d_model=d_model, d_k=d_model, d_v=d_model)
-        self.self_attn = MultiHeadAttention(n_head=8, d_model=d_model, d_k=d_model, d_v=d_model)
+        self.self_attn = MultiHeadAttention(n_head=n_head, d_model=d_model, d_k=d_model, d_v=d_model)
         #self.self_attn = MultiHeadAttention(n_head=8, d_model=d_model, d_attn=d_model*2, d_out=d_model)
-        self.self_norm = nn.LayerNorm(normalized_shape=d_model, eps=1e-3)
+        self.self_norm = nn.LayerNorm(normalized_shape=d_model, eps=layernorm_eps)
         self.dropout1 = nn.Dropout(p=dropout_p)
 
         #self.src_attn = MultiHeadAttention(n_head=8, d_model=d_model, d_k=d_model, d_v=d_model)
-        self.src_attn = MultiHeadAttention(n_head=8, d_model=d_model, d_k=d_model, d_v=d_model)
+        self.src_attn = MultiHeadAttention(n_head=n_head, d_model=d_model, d_k=d_model, d_v=d_model)
         #self.src_attn = MultiHeadAttention(n_head=8, d_model=d_model, d_attn=d_model*2, d_out=d_model)
         self.src_norm = nn.LayerNorm(normalized_shape=d_model)
         self.dropout2 = nn.Dropout(p=dropout_p)
 
-        self.pffn = PositionwiseFFN(d_model=d_model, d_out=d_model, dropout_p=dropout_p)
-        self.f_norm = nn.LayerNorm(normalized_shape=d_model, eps=1e-3)
+        self.pffn = PositionwiseFFN(d_model=d_model, d_out=d_model, d_hidden=d_ffn, dropout_p=dropout_p)
+        self.f_norm = nn.LayerNorm(normalized_shape=d_model, eps=layernorm_eps)
         self.dropout3 = nn.Dropout(p=dropout_p)
 
     def forward(self, x, memory, trg_mask=None, mem_mask=None):
@@ -118,10 +118,10 @@ class TransformerDecoderLayer(nn.Module):
 
 
 class TransformerDecoder(nn.Module):
-    def __init__(self, d_model, n_layers=6, dropout_p=0.1):
+    def __init__(self, d_model, n_head=8, n_layers=6, d_ffn=2048, layernorm_eps=1e-3, dropout_p=0.1):
         super(TransformerDecoder, self).__init__()
         self.decoders = nn.ModuleList([
-                            TransformerDecoderLayer(d_model=d_model, dropout_p=dropout_p) for _ in range(n_layers)])
+                            TransformerDecoderLayer(d_model=d_model, n_head=n_head, d_ffn=d_ffn, layernorm_eps=layernorm_eps, dropout_p=dropout_p) for _ in range(n_layers)])
 
     def forward(self, x, memory, trg_mask=None, mem_mask=None):
         # import pdb; pdb.set_trace()
@@ -136,13 +136,15 @@ class TransformerDecoder(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, src_vocab_size, trg_vocab_size, d_model, n_encoder_layers, n_decoder_layers, dropout_p=0.1):
+    def __init__(self, src_vocab_size, trg_vocab_size,
+                d_model, n_head=8, n_encoder_layers=6, n_decoder_layers=6,
+                d_ffn=2048, layernorm_eps=1e-3, dropout_p=0.1):
         super(Transformer, self).__init__()
         self.src_embeddings = nn.Embedding(src_vocab_size, d_model)
         self.trg_embeddings = nn.Embedding(trg_vocab_size, d_model)
         self.positional_encoding = PositionalEncoding(d_model=d_model, dropout_p=dropout_p)
-        self.encoder_decoder = EncoderDecoder(encoder = TransformerEncoder(d_model=d_model, n_layers=n_decoder_layers, dropout_p=dropout_p),
-                                              decoder = TransformerDecoder(d_model=d_model, n_layers=n_decoder_layers, dropout_p=dropout_p))
+        self.encoder_decoder = EncoderDecoder(encoder = TransformerEncoder(d_model=d_model, n_head=n_head, n_layers=n_decoder_layers, d_ffn=d_ffn, layernorm_eps=layernorm_eps, dropout_p=dropout_p),
+                                              decoder = TransformerDecoder(d_model=d_model, n_head=n_head, n_layers=n_decoder_layers, d_ffn=d_ffn, layernorm_eps=layernorm_eps, dropout_p=dropout_p))
         #self.encoder_decoder = nn.Transformer(d_model=d_model, num_encoder_layers=n_encoder_layers, num_decoder_layers=n_decoder_layers)
         self.out = nn.Sequential(
                     nn.Linear(d_model, d_model * 2),
