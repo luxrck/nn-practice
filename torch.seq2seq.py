@@ -292,6 +292,6 @@ if __name__ == "__main__":
        .set_optimizer(optim.Adam, lr=0.0001, eps=1e-4, betas=(0.9, 0.98))  \
        .to("auto")  \
        .half()  \
-       .save_every(iters=1000)  \
-       .run(train_iter, max_iters=200000, train=False)   \
+       .save_every(iters=10000)  \
+       .run(train_iter, max_iters=200000, train=True)   \
        .eval(test_iter)

@@ -94,7 +94,7 @@ class Trainer(object):
         self.app = app
         self.event_map = defaultdict(set)
         self.event_map["train"] = self.event_map["iter_started"]
-        
+
         self.extension_map = {}
         self.current_iter = 1
 
@@ -127,7 +127,7 @@ class Trainer(object):
     def eval(self, data):
         self.model.eval()
 
-        oy_p, oy = [], []
+        oy_p, oy_g = [], []
 
         with torch.no_grad():
             for _,batch in tqdm(enumerate(data)):
@@ -137,13 +137,15 @@ class Trainer(object):
                 if results is not None and len(results) == 2:
                     y_predicted, targets = results
                     oy_p.append(y_predicted)
-                    oy.append(targets)
-        return oy_p, oy
+                    oy_g.append(targets)
+        oy_p = torch.cat(oy_p, dim=0)
+        oy_g = torch.cat(oy_g, dim=0)
+        return oy_p, oy_g
 
     def run(self, data, max_iters=1000, train=True):
         self.model.train()
         self.optimizer = self.optimizer_builder()
-        
+
         meta = Trainer.Event(name="meta")
         progress = tqdm(total=max_iters, miniters=0)
         event = Trainer.Event(name="e", a=meta, progress=progress, trainer=self, model=self.model, criterion=self.criterion, optimizer=self.optimizer)
