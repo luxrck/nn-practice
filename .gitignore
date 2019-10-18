@@ -6,6 +6,7 @@ checkpoint
 log
 save
 
+*.pkl
 *.pyc
 *.tar.*
 *.txt
